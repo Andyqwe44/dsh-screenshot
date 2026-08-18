@@ -1,0 +1,46 @@
+{
+  "name": "dsh-screenshot",
+  "version": "1.0.0",
+  "description": "Screenshot button for DeepSeek Harness (DSH) chat input — screen capture with rectangle selection, feeds images directly to the model.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml"
+  ],
+  "scripts": {
+    "check": "node --check lib/index.js && node --check lib/client.js"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "plugin",
+    "screenshot",
+    "screen-capture",
+    "screen-shot"
+  ],
+  "author": "Andyq",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "slots",
+        "sessions",
+        "locale"
+      ],
+      "platform": "web",
+      "immediately": true
+    }
+  }
+}

@@ -1,0 +1,10 @@
+# dsh-screenshot bundle patch: inserts the client screenshot row.
+#
+# Applied after the base and web-app bundle layers. The profile's own
+# cordis.patch.yml (and the home-level one) is applied afterwards and may
+# disable the plugin:
+#   - id: dsh-screenshot
+#     disabled: true
+- insert:
+    - id: dsh-screenshot
+      name: dsh-screenshot
