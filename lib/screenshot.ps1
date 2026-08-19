@@ -2,10 +2,36 @@
 # No overlay, no interaction. The browser handles rectangle selection
 # on the returned image, so there are no window z-order issues.
 #
+# DPI-aware: on high-DPI displays (e.g. 200% scaling) the logical
+# Screen.Bounds is smaller than the physical pixels. We set process
+# DPI awareness so CopyFromScreen captures at full physical
+# resolution — otherwise the image is 1440x900 instead of 2880x1800.
+#
 # Output: absolute path of the saved PNG (stdout only).
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+
+# ── DPI awareness ───────────────────────────────────────────────
+# PROCESS_PER_MONITORED_AWARE = 2  (per-monitor DPI aware)
+$dpiCs = @"
+using System;
+using System.Runtime.InteropServices;
+public static class DpiAware {
+    [DllImport("user32.dll")]
+    public static extern IntPtr SetProcessDpiAwarenessContext(IntPtr dpiContext);
+}
+"@
+$dpiTmp = Join-Path $env:TEMP "dsh-dpi-$(Get-Date -Format 'yyyyMMddHHmmssfff').cs"
+try {
+    $dpiCs | Out-File -FilePath $dpiTmp -Encoding UTF8
+    Add-Type -Path $dpiTmp -ErrorAction Stop
+} finally {
+    Remove-Item $dpiTmp -ErrorAction SilentlyContinue
+}
+
+# DPI_AWARENESS_CONTEXT_PER_MONITORED_AWARE = -3 (as IntPtr)
+[DpiAware]::SetProcessDpiAwarenessContext([IntPtr](-3))
 
 $screens = [System.Windows.Forms.Screen]::AllScreens
 if ($screens.Length -eq 0) {
