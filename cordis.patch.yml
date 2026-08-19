@@ -5,8 +5,6 @@
 # disable the plugin:
 #   - id: dsh-screenshot
 #     disabled: true
-
-# Temporarily disabled for keyboard-debug — remove the insert to unload.
-# - insert:
-#     - id: dsh-screenshot
-#       name: dsh-screenshot
+- insert:
+    - id: dsh-screenshot
+      name: dsh-screenshot
