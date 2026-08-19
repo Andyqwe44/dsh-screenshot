@@ -2,6 +2,10 @@
 # Used by the dsh-computer-use model-facing tools so the model can
 # control the desktop: click, type, press keys, scroll, open URLs.
 #
+# Uses SendInput (not keybd_event) so the keyboard state is not
+# corrupted — keybd_event can leave modifiers stuck or drop keys,
+# which breaks the user's own typing afterwards.
+#
 # Usage:
 #   computer_use.ps1 -Action click      -X 100 -Y 200
 #   computer_use.ps1 -Action move       -X 100 -Y 200
@@ -26,9 +30,6 @@ param(
 )
 
 # ── Compile P/Invoke types from a temp .cs file ─────────────────
-# Add-Type -MemberDefinition has issues with out-struct marshaling
-# on Windows PowerShell 5.1; writing a temp file and using -Path is
-# the reliable cross-version approach.
 $cs = @"
 using System;
 using System.Runtime.InteropServices;
@@ -37,6 +38,37 @@ using System.Runtime.InteropServices;
 public struct Pt {
     public int x;
     public int y;
+}
+
+[StructLayout(LayoutKind.Explicit)]
+public struct InputUnion {
+    [FieldOffset(0)] public KEYBD kb;
+    [FieldOffset(0)] public MOUSEINPUT mi;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public struct INPUT {
+    public int type;
+    public InputUnion di;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public struct KEYBD {
+    public short wVk;
+    public short wScan;
+    public uint dwFlags;
+    public uint time;
+    public IntPtr dwExtraInfo;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public struct MOUSEINPUT {
+    public int dx;
+    public int dy;
+    public uint mouseData;
+    public uint flags;
+    public uint time;
+    public IntPtr dwExtraInfo;
 }
 
 public static class Native {
@@ -53,7 +85,7 @@ public static class Native {
     public static extern short VkKeyScan(char c);
 
     [DllImport("user32.dll")]
-    public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, uint dwExtraInfo);
+    public static extern uint SendInput(uint nInputs, [In, MarshalAs(UnmanagedType.LPArray)] INPUT[] pInputs, int cbSize);
 
     [DllImport("user32.dll")]
     public static extern IntPtr GetForegroundWindow();
@@ -77,6 +109,7 @@ public static class Native {
     public const uint MOUSEEVENTF_WHEEL     = 0x800;
     public const uint KEYEVENTF_KEYUP        = 0x02;
     public const int  SW_RESTORE            = 9;
+    public const int  INPUT_KEYBOARD        = 1;
 }
 "@
 
@@ -119,6 +152,36 @@ $VK = @{
 
 # ── Helpers ─────────────────────────────────────────────────────
 
+# Build a KEYBD INPUT struct
+function New-KeyInput {
+    param([int]$Vk, [int]$Scan, [uint]$Flags)
+    $inp = New-Object INPUT
+    $inp.type = [Native]::INPUT_KEYBOARD
+    $inp.di.kb.wVk = [short]$Vk
+    $inp.di.kb.wScan = [short]$Scan
+    $inp.di.kb.dwFlags = $Flags
+    $inp.di.kb.dwExtraInfo = [IntPtr]::Zero
+    $inp.di.kb.time = 0
+    return $inp
+}
+
+# Send an array of INPUT structs via SendInput
+function Send-Inputs {
+    param([INPUT[]]$Inputs)
+    if ($Inputs.Length -eq 0) { return }
+    [Native]::SendInput([uint]$Inputs.Length, $Inputs, [System.Runtime.InteropServices.Marshal]::SizeOf([typeof](INPUT)))
+}
+
+# Release all modifiers so the user's keyboard is never left stuck
+function Release-Modifiers {
+    $mods = @([Native]::MOUSEEVENTF_LEFTDOWN, 0)  # placeholder — we release shift/ctrl/alt/win
+    $inputs = New-Object System.Collections.Generic.List[INPUT]
+    foreach ($vk in 0x10, 0x11, 0x12, 0x5C, 0x5D) {
+        $inputs.Add((New-KeyInput -Vk $vk -Flags [Native]::KEYEVENTF_KEYUP))
+    }
+    Send-Inputs -Inputs $inputs.ToArray()
+}
+
 function Send-Click {
     param([int]$X, [int]$Y, [string]$Button = "left", [int]$Count = 1)
     [Native]::SetCursorPos($X, $Y)
@@ -152,19 +215,26 @@ function Send-Type {
         $virtualKey = $vk -band 0xFF
         $shiftState = ($vk -shr 8) -band 0xFF
 
+        $inputs = New-Object System.Collections.Generic.List[INPUT]
+
+        # Press shift if needed
         if ($shiftState -eq 1) {
-            [Native]::keybd_event(0x10, 0, 0, 0)   # VK_SHIFT down
+            $inputs.Add((New-KeyInput -Vk 0x10 -Flags 0))
         }
 
-        [Native]::keybd_event([byte]$virtualKey, 0, 0, 0)
+        # Key down
+        $inputs.Add((New-KeyInput -Vk $virtualKey -Flags 0))
+
+        # Key up
+        $inputs.Add((New-KeyInput -Vk $virtualKey -Flags [Native]::KEYEVENTF_KEYUP))
+
+        # Release shift
+        if ($shiftState -eq 1) {
+            $inputs.Add((New-KeyInput -Vk 0x10 -Flags [Native]::KEYEVENTF_KEYUP))
+        }
+
+        Send-Inputs -Inputs $inputs.ToArray()
         Start-Sleep -Milliseconds 1
-        [Native]::keybd_event([byte]$virtualKey, 0, [Native]::KEYEVENTF_KEYUP, 0)
-
-        if ($shiftState -eq 1) {
-            [Native]::keybd_event(0x10, 0, [Native]::KEYEVENTF_KEYUP, 0)
-        }
-
-        Start-Sleep -milliseconds 1
         $typed++
     }
     return @{ ok = $true; typed = $typed }
@@ -181,36 +251,40 @@ function Send-Key {
         $modifiers += $parts[$i].ToLower()
     }
 
+    $inputs = New-Object System.Collections.Generic.List[INPUT]
+
     # Press modifiers down
     foreach ($mod in $modifiers) {
         $vk = $VK[$mod]
-        if ($vk) { [Native]::keybd_event([byte]$vk, 0, 0, 0) }
+        if ($vk) { $inputs.Add((New-KeyInput -Vk $vk -Flags 0)) }
     }
-    Start-Sleep -Milliseconds 10
 
     # Press main key
     $vk = $VK[$mainKey.ToLower()]
     if ($vk) {
-        [Native]::keybd_event([byte]$vk, 0, 0, 0)
-        Start-Sleep -Milliseconds 1
-        [Native]::keybd_event([byte]$vk, 0, [Native]::KEYEVENTF_KEYUP, 0)
+        $inputs.Add((New-KeyInput -Vk $vk -Flags 0))
+        $inputs.Add((New-KeyInput -Vk $vk -Flags [Native]::KEYEVENTF_KEYUP))
     } else {
         # Try as a literal character
         $ch = $mainKey[0]
         $vkScan = [Native]::VkKeyScan($ch)
         if ($vkScan -ne -1) {
             $virtualKey = $vkScan -band 0xFF
-            [Native]::keybd_event([byte]$virtualKey, 0, 0, 0)
-            Start-Sleep -milliseconds 1
-            [Native]::keybd_event([byte]$virtualKey, 0, [Native]::KEYEVENTF_KEYUP, 0)
+            $inputs.Add((New-KeyInput -Vk $virtualKey -Flags 0))
+            $inputs.Add((New-KeyInput -Vk $virtualKey -Flags [Native]::KEYEVENTF_KEYUP))
         }
     }
 
     # Release modifiers (reverse order)
     for ($i = $modifiers.Length - 1; $i -ge 0; $i--) {
         $vk = $VK[$modifiers[$i]]
-        if ($vk) { [Native]::keybd_event([byte]$vk, 0, [Native]::KEYEVENTF_KEYUP, 0) }
+        if ($vk) { $inputs.Add((New-KeyInput -Vk $vk -Flags [Native]::KEYEVENTF_KEYUP)) }
     }
+
+    Send-Inputs -Inputs $inputs.ToArray()
+
+    # Safety: release all modifiers in case something went wrong
+    Release-Modifiers
 
     return @{ ok = $true; key = $KeyStr }
 }
