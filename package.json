@@ -1,7 +1,7 @@
 {
   "name": "dsh-screenshot",
   "version": "1.0.0",
-  "description": "Screenshot button for DeepSeek Harness (DSH) chat input — screen capture with rectangle selection, feeds images directly to the model.",
+  "description": "Computer-use plugin for DeepSeek Harness (DSH): screen capture + desktop control tools (mouse, keyboard, scroll, URL open) so the model can see and interact with the desktop autonomously.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -21,8 +21,11 @@
     "dsh",
     "plugin",
     "screenshot",
+    "computer-use",
     "screen-capture",
-    "screen-shot"
+    "mouse",
+    "keyboard",
+    "automation"
   ],
   "author": "Andyq",
   "license": "MIT",
