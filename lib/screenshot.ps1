@@ -1,4 +1,4 @@
-# dsh-screenshot.ps1 — Capture the entire screen(s) to a PNG file.
+# dsh-screenshot.ps1 — Capture the entire screen(s) to a PNG.
 # No overlay, no interaction. The browser handles rectangle selection
 # on the returned image, so there are no window z-order issues.
 #
@@ -7,13 +7,12 @@
 # DPI awareness so CopyFromScreen captures at full physical
 # resolution — otherwise the image is 1440x900 instead of 2880x1800.
 #
-# Output: absolute path of the saved PNG (stdout only).
+# Output: base64-encoded PNG on stdout (no temp file, no disk I/O).
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
 # ── DPI awareness ───────────────────────────────────────────────
-# PROCESS_PER_MONITORED_AWARE = 2  (per-monitor DPI aware)
 $dpiCs = @"
 using System;
 using System.Runtime.InteropServices;
@@ -29,8 +28,6 @@ try {
 } finally {
     Remove-Item $dpiTmp -ErrorAction SilentlyContinue
 }
-
-# DPI_AWARENESS_CONTEXT_PER_MONITORED_AWARE = -3 (as IntPtr)
 [DpiAware]::SetProcessDpiAwarenessContext([IntPtr](-3))
 
 $screens = [System.Windows.Forms.Screen]::AllScreens
@@ -65,8 +62,12 @@ foreach ($s in $screens) {
 
 $graphics.Dispose()
 
-$tempFile = Join-Path $env:TEMP "dsh-screenshot-$(Get-Date -Format 'yyyyMMddHHmmssfff').png"
-$bitmap.Save($tempFile, [System.Drawing.Imaging.ImageFormat]::Png)
+# Encode to PNG in memory, then base64 for stdout transport.
+$ms = New-Object System.IO.MemoryStream
+$bitmap.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
 $bitmap.Dispose()
+$pngBytes = $ms.ToArray()
+$ms.Dispose()
 
-Write-Output $tempFile
+$base64 = [Convert]::ToBase64String($pngBytes)
+Write-Output $base64

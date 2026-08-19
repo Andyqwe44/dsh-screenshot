@@ -47,6 +47,8 @@
     }
   },
   "dependencies": {
-    "@deepseek-ai/dsh-tools": "^0.0.1-rc.1"
+    "@deepseek-ai/dsh-tools": "^0.0.1-rc.1",
+    "@deepseek-ai/dsh-llm": "^0.0.1-rc.1",
+    "@deepseek-ai/dsh-attachment": "^0.0.1-rc.1"
   }
 }
