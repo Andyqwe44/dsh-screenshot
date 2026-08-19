@@ -45,5 +45,8 @@
       "platform": "web",
       "immediately": true
     }
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-tools": "^0.0.1-rc.1"
   }
 }
